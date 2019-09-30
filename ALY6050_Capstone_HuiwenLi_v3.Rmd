@@ -1,0 +1,579 @@
+---
+title: "ALY6050_Capstone_HuiwenLi"
+author: "HuiwenLi"
+date: "6/27/2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r}
+# read in training and test data, add additional column indicating training/test, combine 
+# them to perform feature engineering
+train_raw <- read.csv("Sammamish-Training.csv", stringsAsFactors = FALSE)
+train_raw$label <- "Training"
+
+head(train_raw)
+```
+
+```{r}
+# read test data and add lable column
+library("xlsx")
+test_raw <- read.xlsx("Sammamish-Test.xlsx", 1, stringsAsFactors=FALSE)
+test_raw$label <- "Test"
+head(test_raw)
+```
+
+```{r}
+# check if column names are the same in both data set before combining
+colnames(train_raw) == colnames(test_raw)
+```
+
+```{r}
+# There are 3 column names are different, find out what they are, index = 1, 63,109
+colnames(train_raw[c(1,63,109)])
+colnames(test_raw[c(1,63,109)])
+```
+
+```{r}
+# change the column names to make them match
+colnames(train_raw)[1] <- "ML.Number"
+colnames(test_raw)[63] <- "Lot.Square.Footage"
+colnames(test_raw)[109] <- "Sale.Type"
+
+# check if column names are the same now
+table(colnames(train_raw) == colnames(test_raw))
+```
+
+```{r}
+# row bind both data sets
+full_data <- rbind(train_raw, test_raw)
+
+head(full_data)
+```
+```{r}
+# by examining the data and performing research to understand the dataset, we select 22
+# features that are more related to the sale price, either by intuition or research evidence
+# also include the "Label" variable so we know which are training and test set
+
+col_names <- c("List.Price","Sold.Price", "Year", "Zip.Code", "Bedrooms", "Bathrooms", "Sq.Foot", "Age", "Lot.Size", "Style", "Garage", "Property.Type", "Building.Condition", "Fireplaces.Total", "Parking.Covered.Total", "Water", "Roof", "Year.Built", "School.District", "Senior.Exemption", "Sewer.Type", "Community", "label")
+house <- full_data[col_names]
+
+colnames(house) <- c("List_Price","Sold_Price", "Year", "Zip_Code", "Bedrooms", "Bathrooms", "Sq_Foot", "Age", "Lot_Size", "Style", "Garage", "Property_Type", "Condition", "Fireplaces", "Parking", "Water", "Roof", "Year_Built", "School_District", "Senior_Exemption", "Sewer", "Community", "Label")
+```
+
+
+```{r}
+# summarize the data
+summary(house)
+```
+
+```{r}
+#review data type
+str(house)
+```
+
+
+```{r}
+#check NAs and impute missing values
+dim(house)
+colSums(is.na(house))
+```
+
+```{r}
+# check if NAs in List_Price, Zip_Code, Bedrooms, Bathrooms, Age, Lot_Size, Year_Built, Senior_Exemption belongs to Training data set, if yes we can delete it.
+na_col <- c("List_Price", "Zip_Code", "Bedrooms", "Bathrooms", "Age", "Lot_Size",
+            "Year_Built", "Senior_Exemption", "Label")
+house_na <- house[na_col]
+
+for (i in 1:ncol(house_na)){
+        print(colnames(house_na)[i])
+        print(house_na[is.na(house_na[[i]]), ]$Label) 
+}
+```
+
+
+```{r}
+# Except Lot_Size, we can drop NA rows from columns List_Price, Zip_Code, Bedrooms, Bathrooms, Age, Year_Built, Senior_Exemption
+house <- house[!is.na(house$List_Price), ]
+
+# For numerical variables "Lot_Size", "Fireplaces", "Parking", impute NAs with column mean
+house$Lot_Size[is.na(house$Lot_Size)] <- mean(house$Lot_Size, na.rm=TRUE)
+house$Fireplaces[is.na(house$Fireplaces)] <- mean(house$Fireplaces, na.rm=TRUE)
+house$Parking[is.na(house$Parking)] <- mean(house$Parking, na.rm=TRUE)
+
+colSums(is.na(house))
+```
+
+```{r}
+### Deal with NAs in categorical variables / re-group the categories
+#For "Style" feature, summarize in frequency table
+as.data.frame(cbind(table(house$Style),
+                    round(prop.table(table(house$Style)),2)))
+```
+```{r}
+### Re-group the Style variables
+# group 1 story, 1 story w/Bsmnt to "1 Story";
+# group 2 story, 2 story w/Bsmnt to "2 Story";
+# group Tri-Level, Split Entry, Multi Level to "3 Story";
+# group Condo(1 Level), Condo(2 Levels), Condo(3 Levels) to "Condo";
+# group 1.5 story, 1.5 story w/Bsmnt, Manuf-Double Wide, Manuf-Triple Wide, Manuf-Single 
+# Wide to "others"
+# The new groups are 1 Story, 2 Story, 3 Story, Condo, Townhouse, Others
+
+for (i in 1:nrow(house)) {
+        if (house$Style[i] == "10 - 1 Story" |
+            house$Style[i] == "16 - 1 Story w/Bsmnt.") {
+                house$Style[i] <- "1 Story"
+        } else if (house$Style[i] == "12 - 2 Story" |
+                   house$Style[i] == "18 - 2 Stories w/Bsmnt") {
+                house$Style[i] <- "2 Story"
+        } else if (house$Style[i] == "13 - Tri-Level" |
+                   house$Style[i] == "14 - Split Entry" |
+                   house$Style[i] == "15 - Multi Level") {
+                house$Style[i] <- "3 Story"
+        } else if (house$Style[i] == "30 - Condo (1 Level)" |
+                   house$Style[i] == "31 - Condo (2 Levels)" |
+                   house$Style[i] == "34 - Condo (3 Levels)") {
+                house$Style[i] <- "Condo"
+        } else if (house$Style[i] == "11 - 1 1/2 Story" |
+                   house$Style[i] == "17 - 1 1/2 Stry w/Bsmt" |
+                   house$Style[i] == "21 - Manuf-Double Wide" |
+                   house$Style[i] == "22 - Manuf-Triple Wide" |
+                   house$Style[i] == "20 - Manuf-Single Wide") {
+                house$Style[i] <- "Others"
+        }
+}
+
+house$Style <- factor(house$Style)
+as.data.frame(table(house$Style))
+```
+
+
+```{r}
+# visualize the frequency distribution
+library(ggplot2)
+ggplot(data = house, aes(house$Style, fill=..count..)) + 
+        geom_histogram(stat="count") +
+        geom_text(stat="count",aes(label=..count..),vjust=-.3,size=3)+
+        theme(axis.text.x=element_text(angle=90, hjust=1))+
+        scale_fill_gradient("Count", low="green", high="red")+
+        labs(title="Histogram of House Style",x="House Style",y="Count")
+```
+
+```{r}
+#For "Garage" feature, summarize in frequency table
+table_Garage <- as.data.frame(cbind(table(house$Garage),
+                    round(prop.table(table(house$Garage)),2)))
+table_Garage[order(table_Garage[[2]], decreasing = TRUE), ]
+```
+
+```{r}
+# Regroup them into 3 groups: Garage-Attached, Individual Garage, Others
+for (i in 1:nrow(house)) {
+        if (house$Garage[i] == "Garage-Attached" |
+            house$Garage[i] == "Garage-Attached, Off Street") {
+                house$Garage[i] <- "Garage-Attached"
+        } else if (house$Garage[i] != "Individual Garage") {
+              house$Garage[i] <- "Others"
+        } 
+} 
+
+house$Garage <- factor(house$Garage)
+as.data.frame(table(house$Garage))
+```
+
+```{r}
+# visualize the new Garage feature
+ggplot(data = house, aes(house$Garage, fill=..count..)) + 
+        geom_histogram(stat="count", fill = "skyblue") +
+        geom_text(stat="count",aes(label=..count..),vjust=-.3,size=3)+
+        theme(axis.text.x=element_text(angle=90, hjust=1))+
+        labs(title="Histogram of House Style",x="House Style",y="Count")
+```
+
+
+```{r}
+#For "Property_Type" feature, summarize in frequency table
+table_Type <- as.data.frame(cbind(table(house$Property_Type),
+                    round(prop.table(table(house$Property_Type)),2)))
+table_Type[order(table_Type[[2]], decreasing = TRUE), ]
+
+# Only 3 groups, no missing inputs hence we do not need to perform any re-grouping.
+# Visualize "Property_Type"
+house$Property_Type <- factor(house$Property_Type)
+```
+
+```{r}
+#For "Condition" feature, summarize in frequency table
+table_Condition <- as.data.frame(cbind(table(house$Condition),
+                    round(prop.table(table(house$Condition)),2)))
+table_Condition[order(table_Condition[[2]], decreasing = TRUE), ]
+```
+
+
+```{r}
+# Replace NAs with "Others"
+house$Condition[is.na(house$Condition)] <- "Others"
+
+# re-group "Condition" to 5 groups: Very Good, Good, Under Construction, Remodeled, Others
+
+for (i in 1:nrow(house)){
+        if (house$Condition[i] != "Very Good" &
+            house$Condition[i] != "Good" &
+            house$Condition[i] != "Under Construction" &
+            house$Condition[i] != "Remodeled"){
+                house$Condition[i] <- "Others"
+            }
+}
+
+house$Condition <- factor(house$Condition)
+as.data.frame(table(house$Condition))
+```
+
+```{r}
+#For "Water" feature, summarize in frequency table
+table_Water <- as.data.frame(cbind(table(house$Water),
+                    round(prop.table(table(house$Water)),2)))
+table_Water[order(table_Water[[2]], decreasing = TRUE), ]
+```
+```{r}
+# impute the NAs with "Others"
+house$Water[is.na(house$Water)] <- "Others"
+
+# Re-group into "Public" and "Others"
+for (i in 1:nrow(house)){
+        if (house$Water[i] != "Public"){
+                house$Water[i] <- "Others"
+        }
+}
+
+house$Water <- factor(house$Water)
+as.data.frame(table(house$Water))
+```
+```{r}
+#For "Roof" feature, summarize in frequency table
+table_Roof <- as.data.frame(cbind(table(house$Roof),
+                    round(prop.table(table(house$Roof)),2)))
+table_Roof[order(table_Roof[[2]], decreasing = TRUE), ]
+```
+```{r}
+# Re-group "Roof" into 3 groups: Composition, Cedar Shake, Others
+
+for (i in 1:nrow(house)){
+        if (house$Roof[i] != "Composition" & house$Roof[i] != "Cedar Shake"){
+                house$Roof[i] <- "Others"
+        }
+}
+
+house$Roof <- factor(house$Roof)
+as.data.frame(table(house$Roof))
+```
+```{r}
+#For "School_District" feature, summarize in frequency table
+table_School <- as.data.frame(cbind(table(house$School_District),
+                    round(prop.table(table(house$School_District)),2)))
+table_School[order(table_School[[2]], decreasing = TRUE), ]
+```
+```{r}
+# Re-group into 3 groups: Lake Washington, Issaquah, Others
+
+for (i in 1:nrow(house)){
+        if (house$School_District[i] != "Lake Washington" & 
+            house$School_District[i] != "Issaquah"){
+                house$School_District[i] <- "Others"
+        }
+}
+
+house$School_District <- factor(house$School_District)
+as.data.frame(table(house$School_District))
+```
+```{r}
+# For "Senior_Exemption" feature
+house$Senior_Exemption <- factor(house$Senior_Exemption)
+
+#summarize in frequency table
+as.data.frame(table(house$Senior_Exemption))
+```
+```{r}
+#For "Sewer" feature, summarize in frequency table
+table_Sewer <- as.data.frame(cbind(table(house$Sewer),
+                    round(prop.table(table(house$Sewer)),2)))
+table_Sewer[order(table_Sewer[[2]], decreasing = TRUE), ]
+```
+```{r}
+# Impute missing values with "Others"
+house$Sewer[is.na(house$Sewer)] <- "Others"
+
+# Re-group into 3 groups: Sewer Connected, Septic, Others
+for (i in 1:nrow(house)){
+        if (house$Sewer[i] != "Sewer Connected" & house$Sewer[i] != "Septic"){
+                house$Sewer[i] <- "Others"
+        }
+}
+
+house$Sewer <- factor(house$Sewer)
+as.data.frame(table(house$Sewer))
+```
+```{r}
+#For "community" feature, summarize in frequency table
+table_Community <- as.data.frame(cbind(table(house$Community),
+                    round(prop.table(table(house$Community)),2)))
+table_Community[order(table_Community[[2]], decreasing = TRUE), ]
+```
+```{r}
+# Re-group those <3% to "Others", 8 groups in total
+for (i in 1:nrow(house)){
+        if (house$Community[i] != "Sammamish" & 
+            house$Community[i] != "Plateau" &
+            house$Community[i] != "Pine Lake" &
+            house$Community[i] != "Trossachs" &
+            house$Community[i] != "Beaver Lake" &
+            house$Community[i] != "East Lake Sammamish" &
+            house$Community[i] != "Inglewood" ){
+                house$Community[i] <- "Others"
+        }
+}
+
+house$Community <- factor(house$Community)
+as.data.frame(table(house$Community))
+```
+
+```{r}
+summary(house)
+```
+```{r}
+#correct the typo error "2106" in Year_built column
+house[house$Year_Built == 2106,'Year_Built'] = 2016
+# Use Year - Age to calculate the age of the house
+house$Age <- (house$Year - house$Year_Built)
+```
+
+
+```{r}
+# count # values == 0 for all the columns
+colSums(house == 0)
+```
+```{r}
+# replace 0 with mean in 'Bedrooms', 'Bathrooms','Sq_Foot','Lot_Size','Fireplaces',
+# 'Parking', except 'Age'.
+house$Bedrooms[house$Bedrooms == 0] <- mean(house$Bedrooms, na.rm=TRUE)
+house$Bathrooms[house$Bathrooms == 0] <- mean(house$Bathrooms, na.rm=TRUE)
+house$Sq_Foot[house$Sq_Foot == 0] <- mean(house$Sq_Foot, na.rm=TRUE)
+house$Lot_Size[house$Lot_Size == 0] <- mean(house$Lot_Size, na.rm=TRUE)
+house$Fireplaces[house$Fireplaces == 0] <- mean(house$Fireplaces, na.rm=TRUE)
+house$Parking[house$Parking == 0] <- mean(house$Parking, na.rm=TRUE)
+
+colSums(house == 0)
+colSums(is.na(house))
+# no more 0, no more NAs in the dataset
+```
+
+
+```{r}
+# correlation plot
+library(dplyr)
+library(corrplot)
+
+cordata <- house %>% select(-c("Style","Garage","Property_Type","Condition","Water","Roof",
+                              "School_District","Senior_Exemption","Sewer","Community","Label"))
+corrplot(cor(cordata), method="circle")
+
+#Based on the correlation,the list_price and sold_price are perfectly positively correlated, 
+# while age and year_built are perfectly negatively correlated, we may consider using only 1 of # them in model building.
+```
+
+```{r}
+# Visualize List_Price
+par(mfrow = c(1,2))
+hist(house$List_Price, prob = TRUE, main="List Price for all the sold houses")
+curve(dnorm(x, mean=mean(house$List_Price),sd=sd(house$List_Price)),
+      col="red", lwd=2, add=TRUE)
+
+#Original List_Price is highly skewed to the right, Use log transformation to make it 
+# approximately normally distributed.
+hist(log(house$List_Price), prob = TRUE, main="log(List Price) for all the sold houses")
+curve(dnorm(x, mean=mean(log(house$List_Price)),sd=sd(log(house$List_Price))),
+      col="red", lwd=2, add=TRUE)
+
+```
+```{r}
+# Visualize Sold_Price
+par(mfrow = c(1,2))
+hist(house$Sold_Price, prob = TRUE, main="Sold Price for all the sold houses")
+curve(dnorm(x, mean=mean(house$Sold_Price),sd=sd(house$Sold_Price)),
+      col="red", lwd=2, add=TRUE)
+
+#Original Sold_Price is highly skewed to the right, Use log transformation to make it 
+# approximately normally distributed.
+hist(log(house$Sold_Price), prob = TRUE, main="log(Sold Price) for all the sold houses")
+curve(dnorm(x, mean=mean(log(house$Sold_Price)),sd=sd(log(house$Sold_Price))),
+      col="red", lwd=2, add=TRUE)
+
+```
+
+
+```{r}
+# visualize other numeric variables
+par(mfrow = c(2,2))
+boxplot(house$Year, xlab = "Year")
+boxplot(house$Bedrooms, xlab = "Bedrooms")
+boxplot(house$Bathrooms, xlab = "Bathrooms")
+boxplot(house$Sq_Foot, xlab = "Squre Foot")
+```
+```{r}
+par(mfrow = c(2,2))
+boxplot(house$Age, xlab = "House Age")
+boxplot(house$Fireplaces, xlab = "Fireplaces")
+boxplot(house$Parking, xlab = "No. of Parking")
+```
+
+```{r}
+# Split into training and test set
+train <- subset(house, Label == "Training", select = -Label)
+test <- subset(house, Label == "Test", select = -Label)
+
+# transform List_Price to log_List_Price
+train$List_Price <- log(train$List_Price)
+colnames(train)[1] <- "log_List_Price"
+
+test$List_Price <- log(test$List_Price)
+colnames(test)[1] <- "log_List_Price"
+
+dim(train)
+dim(test)
+```
+
+```{r}
+str(train)
+```
+
+
+```{r}
+# Iteratively fit a model with linear regression
+lm_fit1 <- lm(log(Sold_Price) ~ ., data=train)
+summary(lm_fit1)
+par(mfrow=c(2,2))
+plot(lm_fit1)
+
+# Based on the residula plots, residuals are approximately random, independent and normally 
+# distributed
+```
+```{r}
+# based on the feature importance, the new model lm_fit1 becomes
+lm_fit1a <- lm(log(Sold_Price) ~ log_List_Price + Year + Sq_Foot + Age + Style + Water + Roof +
+                     School_District, data = train)
+summary(lm_fit1a)
+par(mfrow=c(2,2))
+plot(lm_fit1a)
+
+# Based on the residula plots, residuals are approximately random, independent and normally 
+# distributed
+```
+
+
+```{r}
+# regression model without log_List_Price
+lm_fit2 <- lm(log(Sold_Price) ~. - log_List_Price, data=train)
+summary(lm_fit2)
+par(mfrow=c(2,2))
+plot(lm_fit2)
+
+# Based on the residula plots, residuals are approximately random, independent and normally 
+# distributed
+```
+```{r}
+# based on the feature importance, the new model lm_fit2 becomes
+lm_fit2a <- lm(log(Sold_Price) ~ Year + Bedrooms + Bathrooms + Sq_Foot + Age + Style + Garage +
+                 Property_Type + Condition + Fireplaces + Parking + Roof +
+                 School_District + Community, data = train)
+summary(lm_fit2a)
+par(mfrow=c(2,2))
+plot(lm_fit2a)
+
+# Based on the residula plots, residuals are approximately random, independent and normally 
+# distributed
+```
+
+
+```{r}
+# Make predictions with both lm models, and inverse transfor the log
+pred_lm1_log <- predict(lm_fit1a, test[-2])
+pred_lm1 <- exp(pred_lm1_log)
+pred_lm2_log <- predict(lm_fit2a, test[-2])
+pred_lm2 <- exp(pred_lm2_log)
+
+# Calculate RMSE
+y_test <- test$Sold_Price
+
+# install.packages("Metrics")
+library(Metrics)
+rmse_lm1 <- rmse(y_test, pred_lm1)
+rmse_lm2 <- rmse(y_test, pred_lm2)
+
+cat("RMSE of lm_fit1: ", rmse_lm1, "\n")
+cat("RMSE of lm_fit2: ", rmse_lm2)
+```
+```{r}
+# Calculate MAPE
+# install.packages("MLmetrics")
+library(MLmetrics)
+mape_lm1 <- MAPE(pred_lm1, y_test)
+mape_lm2 <- MAPE(pred_lm2, y_test)
+
+cat("MAPE of lm_fit1: ", mape_lm1, "\n")
+cat("MAPE of lm_fit2: ", mape_lm2)
+```
+
+```{r}
+## Try LASSO regularization with all the features
+library(glmnet)
+
+train_noy <- train[,-2]
+
+y <- as.matrix(train$Sold_Price)
+x <- model.matrix(~.,data=train_noy)
+
+model_lasso <- glmnet(x,log(y))
+```
+
+
+```{r}
+# use glmnet function to plot the path of each of predictor variable coefficients 
+# against the L1 norm of the beta vector. 
+plot.glmnet(model_lasso, xvar = "norm", label = TRUE) 
+plot.glmnet(model_lasso, xvar = "lambda", label = TRUE) 
+```
+```{r}
+# CV Fit
+cv_fit <- cv.glmnet(x=x, y=log(y), alpha = 1, nlambda = 1000)
+plot.cv.glmnet(cv_fit)
+```
+```{r}
+# cv.glmnet function to get the cross validation curve and the value of lambda 
+# that minimizes the mean cross validation error.
+cv_fit$lambda.min
+
+# Using the minimum value of lambda from the previous step, get the estimated beta matrix. 
+# Note that some coefficients have been shrunk to zero. 
+# This indicates which predictors are important in explaining the variation in y.
+fit_lasso <- glmnet(x=x, y=log(y), alpha = 1, lambda=cv_fit$lambda.min)
+fit_lasso$beta
+coef(fit_lasso)
+```
+```{r}
+#make prediction using fit_lasso
+new_test <- model.matrix(~., data = test[-2])
+y_pred_lasso_log <- predict(fit_lasso, new_test)
+y_pred_lasso <- exp(y_pred_lasso_log)
+
+#calculate RMSE and MAPE
+
+rmse_lasso <- rmse(y_test, y_pred_lasso)
+mape_lasso <- MAPE(y_pred_lasso, y_test)
+
+cat("RMSE of lasso: ", rmse_lasso, "\n")
+cat("MAPE of lasso: ", mape_lasso)
+```
+
+
